@@ -82,7 +82,7 @@ def main():
     from utils.utils import read_cookies
     from utils.logger_manager import logger
     from utils.custom_exceptions import TikTokRecorderError
-    from check_updates import check_updates
+    from utils.check_updates import check_updates
 
     try:
         # validate and parse command line arguments

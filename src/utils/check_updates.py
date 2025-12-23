@@ -86,7 +86,8 @@ def check_updates() -> bool:
 
     download_file(URL_REPO, FILE_NAME_UPDATE)
 
-    dir_path = Path(__file__).parent
+    # Adjusted to point to src root (parent of utils)
+    dir_path = Path(__file__).parent.parent
     temp_update_dir = dir_path / "update_temp"
 
     # Extract content from zip to a temporary update directory

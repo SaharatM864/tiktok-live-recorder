@@ -1,6 +1,5 @@
 import aiohttp
-import re
-import json
+
 from typing import Optional
 from src.utils.logger_manager import logger
 from src.config import config
@@ -28,37 +27,12 @@ class AsyncTikTokAPI:
                     if response.status == 200:
                         html = await response.text()
 
-                        # Try to find room_id in HTML
-                        # Pattern 1: room_id=1234567890
-                        match = re.search(r"room_id=([0-9]+)", html)
-                        if match:
-                            return match.group(1)
+                        # Use shared parser
+                        from src.core.common import TikTokUrlParser
 
-                        # Pattern 2: "roomId":"1234567890"
-                        match = re.search(r'"roomId":"([0-9]+)"', html)
-                        if match:
-                            return match.group(1)
-
-                        # Pattern 3: SIGI_STATE (JSON in script tag)
-                        match = re.search(
-                            r'<script id="SIGI_STATE" type="application/json">(.*?)</script>',
-                            html,
-                        )
-                        if match:
-                            data = json.loads(match.group(1))
-                            # Navigate json to find room id... implementation varies as tiktok changes structure
-                            # This is a fallback attempt
-                            try:
-                                live_room = (
-                                    data.get("LiveRoom", {})
-                                    .get("liveRoomUserInfo", {})
-                                    .get("user", {})
-                                    .get("roomId")
-                                )
-                                if live_room:
-                                    return live_room
-                            except Exception:
-                                pass
+                        room_id = TikTokUrlParser.parse_room_id_from_html(html)
+                        if room_id:
+                            return room_id
 
                     elif response.status == 404:
                         logger.error(f"User {user} not found (404)")

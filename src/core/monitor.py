@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from src.utils.logger_manager import logger
 from src.config import config
-from src.core.api import AsyncTikTokAPI
+from src.core.tiktok_api_async import AsyncTikTokAPI
 from src.core.streamlink_recorder import StreamlinkRecorder
 from src.core.events import event_bus, Events
 
