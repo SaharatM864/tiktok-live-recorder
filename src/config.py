@@ -29,8 +29,8 @@ class AppConfig(BaseSettings):
     duration: Optional[int] = Field(
         None, description="Maximum duration of recording in seconds"
     )
-    check_interval: int = Field(
-        5, description="Interval in minutes to check for live (automatic mode)"
+    check_interval: float = Field(
+        1.0, description="Interval in minutes to check for live (automatic mode)"
     )
 
     # Network Settings

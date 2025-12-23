@@ -1,7 +1,5 @@
 import json
 import re
-import asyncio
-from typing import Optional, List
 
 from http_utils.async_http_client import AsyncHttpClient
 from utils.enums import StatusCode, TikTokError
@@ -11,6 +9,9 @@ from utils.custom_exceptions import (
     TikTokRecorderError,
     LiveNotFound,
 )
+
+
+from core.common import TikTokUrlParser
 
 
 class TikTokAPI:
@@ -148,6 +149,19 @@ class TikTokAPI:
     async def get_room_id_from_user(self, user: str) -> str | None:
         """Given a username, get the room_id."""
         try:
+            # 1. Try scraping first (Fastest & Stealthy with curl_cffi)
+            try:
+                response = await self.http_client.get(
+                    f"{self.BASE_URL}/@{user}/live", allow_redirects=False
+                )
+                if response.status_code == 200:
+                    room_id = TikTokUrlParser.parse_room_id_from_html(response.text)
+                    if room_id:
+                        return room_id
+            except Exception as e:
+                logger.warning(f"Scraping method failed (Fallback to API): {e}")
+
+            # 2. Fallback to Signed API (Slower, External Dependency)
             signed_url = await self._tikrec_get_room_id_signed_url(user)
 
             response = await self.http_client.get(signed_url)
