@@ -39,7 +39,9 @@ class VideoManagement:
                 file.replace("_flv.mp4", ".mp4"),
                 c="copy",
                 y="-y",
-            ).run(quiet=True)
+            ).global_args("-hide_banner", "-stats", "-loglevel", "error").run(
+                quiet=False
+            )
         except ffmpeg.Error as e:
             logger.error(
                 f"ffmpeg error: {e.stderr.decode() if hasattr(e, 'stderr') else str(e)}"

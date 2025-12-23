@@ -64,6 +64,10 @@ class HttpRecorder:
 
                         start_time = time.time()
                         for chunk in self.tiktok.download_live_stream(live_url):
+                            if stop_event.is_set():
+                                stop_recording = True
+                                break
+
                             buffer.extend(chunk)
                             if len(buffer) >= buffer_size:
                                 out_file.write(buffer)
