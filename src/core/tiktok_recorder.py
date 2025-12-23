@@ -53,6 +53,7 @@ class TikTokRecorder:
         Perform async initialization tasks.
         """
         # Check if the user's country is blacklisted
+        logger.info("Checking country blacklist status...")
         is_blacklisted = await self.tiktok.is_country_blacklisted()
         if is_blacklisted:
             if self.room_id is None:
@@ -74,18 +75,22 @@ class TikTokRecorder:
         else:
             # Get live information based on the provided user data
             if self.url:
+                logger.info(f"Fetching user info from URL: {self.url}")
                 self.user, self.room_id = await self.tiktok.get_room_and_user_from_url(
                     self.url
                 )
 
             if not self.user:
+                logger.info(f"Fetching user info from Room ID: {self.room_id}")
                 self.user = await self.tiktok.get_user_from_room_id(self.room_id)
 
             if not self.room_id:
+                logger.info(f"Fetching Room ID for user: {self.user}")
                 self.room_id = await self.tiktok.get_room_id_from_user(self.user)
 
             logger.info(f"USERNAME: {self.user}" + ("\n" if not self.room_id else ""))
             if self.room_id:
+                logger.info(f"Checking if room {self.room_id} is alive...")
                 is_alive = await self.tiktok.is_room_alive(self.room_id)
                 logger.info(
                     f"ROOM_ID:  {self.room_id}" + ("\n" if not is_alive else "")

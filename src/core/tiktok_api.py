@@ -34,7 +34,7 @@ class TikTokAPI:
             response = await self.http_client.get(
                 f"{self.BASE_URL}/live", allow_redirects=False
             )
-            return response.status == StatusCode.REDIRECT
+            return response.status_code == StatusCode.REDIRECT
         except Exception as e:
             logger.error(f"Error checking country blacklist: {e}")
             return False
@@ -51,7 +51,7 @@ class TikTokAPI:
                 f"{self.WEBCAST_URL}/webcast/room/check_alive/"
                 f"?aid=1988&region=CH&room_ids={room_id}&user_is_login=true"
             )
-            data = await response.json()
+            data = response.json()
 
             if "data" not in data or len(data["data"]) == 0:
                 return False
@@ -67,7 +67,7 @@ class TikTokAPI:
         """
         try:
             response = await self.http_client.get(f"{self.BASE_URL}/foryou")
-            text = await response.text()
+            text = response.text
 
             sec_uid = re.search('"secUid":"(.*?)",', text)
             if sec_uid:
@@ -85,7 +85,7 @@ class TikTokAPI:
             response = await self.http_client.get(
                 f"{self.WEBCAST_URL}/webcast/room/info/?aid=1988&room_id={room_id}"
             )
-            data = await response.json()
+            data = response.json()
 
             if "Follow the creator to watch their LIVE" in json.dumps(data):
                 raise UserLiveError(TikTokError.ACCOUNT_PRIVATE_FOLLOW)
@@ -108,12 +108,12 @@ class TikTokAPI:
         """
         try:
             response = await self.http_client.get(live_url, allow_redirects=False)
-            content = await response.text()
+            content = response.text
 
-            if response.status == StatusCode.REDIRECT:
+            if response.status_code == StatusCode.REDIRECT:
                 raise UserLiveError(TikTokError.COUNTRY_BLACKLISTED)
 
-            if response.status == StatusCode.MOVED:  # MOBILE URL
+            if response.status_code == StatusCode.MOVED:  # MOBILE URL
                 matches = re.findall("com/@(.*?)/live", content)
                 if len(matches) < 1:
                     raise LiveNotFound(TikTokError.INVALID_TIKTOK_LIVE_URL)
@@ -141,7 +141,7 @@ class TikTokAPI:
             f"{self.TIKREC_API}/tiktok/room/api/sign",
             params={"unique_id": user},
         )
-        data = await response.json()
+        data = response.json()
         signed_path = data.get("signed_path")
         return f"{self.BASE_URL}{signed_path}"
 
@@ -151,12 +151,12 @@ class TikTokAPI:
             signed_url = await self._tikrec_get_room_id_signed_url(user)
 
             response = await self.http_client.get(signed_url)
-            content = await response.text()
+            content = response.text
 
             if not content or "Please wait" in content:
                 raise UserLiveError(TikTokError.WAF_BLOCKED)
 
-            data = await response.json()
+            data = response.json()
             return (data.get("data") or {}).get("user", {}).get("roomId")
         except Exception as e:
             logger.error(f"Error getting room_id from user: {e}")
@@ -208,10 +208,10 @@ class TikTokAPI:
 
                 response = await self.http_client.get(url)
 
-                if response.status != StatusCode.OK:
+                if response.status_code != StatusCode.OK:
                     raise TikTokRecorderError("Failed to retrieve followers list.")
 
-                data = await response.json()
+                data = response.json()
                 user_list = data.get("userList", [])
 
                 for user in user_list:
@@ -242,7 +242,7 @@ class TikTokAPI:
         response = await self.http_client.get(
             f"{self.WEBCAST_URL}/webcast/room/info/?aid=1988&room_id={room_id}"
         )
-        data = await response.json()
+        data = response.json()
 
         if "This account is private" in data:
             raise UserLiveError(TikTokError.ACCOUNT_PRIVATE)

@@ -1,6 +1,5 @@
-import aiohttp
-import asyncio
 from typing import Optional, Dict, Any
+from curl_cffi.requests import AsyncSession
 
 
 class AsyncHttpClient:
@@ -10,31 +9,33 @@ class AsyncHttpClient:
         self.proxy = proxy
         self.cookies = cookies
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.tiktok.com/",
         }
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session: Optional[AsyncSession] = None
 
     async def _ensure_session(self):
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(
-                headers=self.headers, cookies=self.cookies, trust_env=True
+        if self.session is None:
+            self.session = AsyncSession(
+                headers=self.headers,
+                cookies=self.cookies,
+                impersonate="chrome120",
+                proxies={"http": self.proxy, "https": self.proxy}
+                if self.proxy
+                else None,
             )
 
-    async def get(
-        self, url: str, params: Optional[Dict[str, Any]] = None, **kwargs
-    ) -> aiohttp.ClientResponse:
+    async def get(self, url: str, params: Optional[Dict[str, Any]] = None, **kwargs):
         await self._ensure_session()
-        return await self.session.get(url, params=params, proxy=self.proxy, **kwargs)
+        kwargs.setdefault("timeout", 10)
+        return await self.session.get(url, params=params, **kwargs)
 
-    async def post(
-        self, url: str, data: Any = None, json: Any = None, **kwargs
-    ) -> aiohttp.ClientResponse:
+    async def post(self, url: str, data: Any = None, json: Any = None, **kwargs):
         await self._ensure_session()
-        return await self.session.post(
-            url, data=data, json=json, proxy=self.proxy, **kwargs
-        )
+        kwargs.setdefault("timeout", 10)
+        return await self.session.post(url, data=data, json=json, **kwargs)
 
     async def close(self):
-        if self.session and not self.session.closed:
+        if self.session:
             await self.session.close()
+            self.session = None
