@@ -130,18 +130,6 @@ def install_requirements():
 
 
 def check_and_install_dependencies():
-    logger.info("Checking and Installing dependencies...")
-
-    dependencies = [
-        check_distro_library(),
-        check_argparse_library(),
-        check_curl_cffi_library(),
-        check_requests_library(),
-        check_ffmpeg_binary(),
-    ]
-
-    if False in dependencies:
-        install_requirements()
-
+    # Only check for FFmpeg binary as it is critical and external
     if not check_ffmpeg_binary():
         install_ffmpeg_binary()

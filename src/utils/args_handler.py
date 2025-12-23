@@ -16,6 +16,7 @@ def parse_args():
 
     parser.add_argument(
         "-url",
+        "--url",
         dest="url",
         help="Record a live session from the TikTok URL.",
         action="store",
@@ -23,6 +24,8 @@ def parse_args():
 
     parser.add_argument(
         "-user",
+        "--user",
+        "-u",
         dest="user",
         help="Record a live session from the TikTok username.",
         action="store",

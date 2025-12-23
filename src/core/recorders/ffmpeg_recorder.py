@@ -24,16 +24,28 @@ class FFmpegRecorder(IRecorder):
 
         if self._process:
             try:
-                # Try graceful termination first
+                # Try graceful termination by sending 'q' to stdin (FFmpeg standard quit)
                 if self._process.returncode is None:
-                    self._process.terminate()
                     try:
-                        await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                        if self._process.stdin:
+                            self._process.stdin.write(b"q")
+                            await self._process.stdin.drain()
+                    except Exception:
+                        pass
+
+                    try:
+                        await asyncio.wait_for(self._process.wait(), timeout=3.0)
                     except asyncio.TimeoutError:
+                        # If 'q' didn't work, try terminate (SIGTERM)
                         logger.warning(
-                            "FFmpeg did not terminate gracefully, killing..."
+                            "FFmpeg did not quit with 'q', sending terminate..."
                         )
-                        self._process.kill()
+                        self._process.terminate()
+                        try:
+                            await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                        except asyncio.TimeoutError:
+                            logger.warning("FFmpeg did not terminate, killing...")
+                            self._process.kill()
             except Exception as e:
                 logger.error(f"Error stopping FFmpeg: {e}")
 
@@ -75,7 +87,10 @@ class FFmpegRecorder(IRecorder):
 
             # Create subprocess
             self._process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.PIPE,
             )
 
             # Wait for stop event or process exit
