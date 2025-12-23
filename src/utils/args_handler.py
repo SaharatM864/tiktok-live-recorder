@@ -83,24 +83,6 @@ def parse_args():
         action="store",
     )
 
-    parser.add_argument(
-        "-telegram",
-        dest="telegram",
-        action="store_true",
-        help="Activate the option to upload the video to Telegram at the end "
-        "of the recording.\nRequires configuring the telegram.json file",
-    )
-
-    parser.add_argument(
-        "-no-update-check",
-        dest="update_check",
-        action="store_false",
-        help=(
-            "Disable the check for updates before running the program. "
-            "By default, update checking is enabled."
-        ),
-    )
-
     args = parser.parse_args()
 
     return args

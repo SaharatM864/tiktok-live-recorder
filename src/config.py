@@ -39,12 +39,6 @@ class AppConfig(BaseSettings):
     )
     cookies_file: str = Field("cookies.json", description="Path to cookies file")
 
-    # Upload Settings
-    telegram_enabled: bool = Field(False, description="Enable Telegram upload")
-    telegram_api_id: Optional[int] = Field(None, description="Telegram API ID")
-    telegram_api_hash: Optional[str] = Field(None, description="Telegram API Hash")
-    telegram_chat_id: Optional[str] = Field(None, description="Telegram Chat ID")
-
     # Logging
     log_level: str = Field("INFO", description="Logging level")
 

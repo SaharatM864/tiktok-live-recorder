@@ -5,9 +5,7 @@ import multiprocessing
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def record_user(
-    user, url, room_id, mode, interval, proxy, output, duration, use_telegram, cookies
-):
+def record_user(user, url, room_id, mode, interval, proxy, output, duration, cookies):
     from core.tiktok_recorder import TikTokRecorder
     from utils.logger_manager import logger
 
@@ -22,7 +20,6 @@ def record_user(
             proxy=proxy,
             output=output,
             duration=duration,
-            use_telegram=use_telegram,
         ).run()
     except Exception as e:
         logger.error(f"{e}")
@@ -43,7 +40,6 @@ def run_recordings(args, mode, cookies):
                     args.proxy,
                     args.output,
                     args.duration,
-                    args.telegram,
                     cookies,
                 ),
             )
@@ -72,7 +68,6 @@ def run_recordings(args, mode, cookies):
             args.proxy,
             args.output,
             args.duration,
-            args.telegram,
             cookies,
         )
 
@@ -82,19 +77,10 @@ def main():
     from utils.utils import read_cookies
     from utils.logger_manager import logger
     from utils.custom_exceptions import TikTokRecorderError
-    from utils.check_updates import check_updates
 
     try:
         # validate and parse command line arguments
         args, mode = validate_and_parse_args()
-
-        # check for updates
-        if args.update_check is True:
-            logger.info("Checking for updates...\n")
-            if check_updates():
-                exit()
-        else:
-            logger.info("Skipped update check\n")
 
         # read cookies from the config file
         cookies = read_cookies()

@@ -4,7 +4,6 @@ from threading import Thread
 from core.tiktok_api import TikTokAPI
 from utils.logger_manager import logger
 from utils.video_management import VideoManagement
-from upload.telegram import TelegramUploader
 from utils.custom_exceptions import LiveNotFound, UserLiveError, TikTokRecorderError
 from utils.enums import Mode, Error, TimeOut, TikTokError
 from utils.signals import stop_event
@@ -22,7 +21,6 @@ class TikTokRecorder:
         proxy,
         output,
         duration,
-        use_telegram,
     ):
         # Setup TikTok API client
         self.tiktok = TikTokAPI(proxy=proxy, cookies=cookies)
@@ -38,8 +36,7 @@ class TikTokRecorder:
         self.duration = duration
         self.output = output
 
-        # Upload Settings
-        self.use_telegram = use_telegram
+        # Tool Settings
 
         # Check if the user's country is blacklisted
         self.check_country_blacklisted()
@@ -200,9 +197,6 @@ class TikTokRecorder:
 
         if output_file:
             VideoManagement.convert_flv_to_mp4(output_file)
-
-            if self.use_telegram:
-                TelegramUploader().upload(output_file.replace("_flv.mp4", ".mp4"))
 
     def check_country_blacklisted(self):
         is_blacklisted = self.tiktok.is_country_blacklisted()
