@@ -123,5 +123,9 @@ if __name__ == "__main__":
     # set up signal handling for graceful shutdown
     multiprocessing.freeze_support()
 
+    from utils.signals import setup_signal_handlers
+
+    setup_signal_handlers()
+
     # run
     main()

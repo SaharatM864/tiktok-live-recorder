@@ -7,6 +7,7 @@ from utils.video_management import VideoManagement
 from upload.telegram import TelegramUploader
 from utils.custom_exceptions import LiveNotFound, UserLiveError, TikTokRecorderError
 from utils.enums import Mode, Error, TimeOut, TikTokError
+from utils.signals import stop_event
 
 
 class TikTokRecorder:
@@ -105,7 +106,7 @@ class TikTokRecorder:
         self.start_recording(self.user, self.room_id)
 
     def automatic_mode(self):
-        while True:
+        while not stop_event.is_set():
             try:
                 self.room_id = self.tiktok.get_room_id_from_user(self.user)
                 self.manual_mode()
@@ -134,7 +135,7 @@ class TikTokRecorder:
     def followers_mode(self):
         active_recordings = {}  # follower -> Process
 
-        while True:
+        while not stop_event.is_set():
             try:
                 followers = self.tiktok.get_followers_list(self.sec_uid)
 

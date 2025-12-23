@@ -6,6 +6,7 @@ from requests import RequestException
 from utils.logger_manager import logger
 from utils.custom_exceptions import LiveNotFound
 from utils.enums import TikTokError, Error, TimeOut, Mode
+from utils.signals import stop_event
 
 
 class HttpRecorder:
@@ -55,7 +56,7 @@ class HttpRecorder:
         try:
             with open(filename, "wb") as out_file:
                 stop_recording = False
-                while not stop_recording:
+                while not stop_recording and not stop_event.is_set():
                     try:
                         if not self.tiktok.is_room_alive(room_id):
                             logger.info("User is no longer live. Stopping recording.")
