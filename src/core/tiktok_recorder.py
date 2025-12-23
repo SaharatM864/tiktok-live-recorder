@@ -4,7 +4,7 @@ from threading import Thread
 from core.tiktok_api import TikTokAPI
 from utils.logger_manager import logger
 from utils.video_management import VideoManagement
-from upload.telegram import Telegram
+from upload.telegram import TelegramUploader
 from utils.custom_exceptions import LiveNotFound, UserLiveError, TikTokRecorderError
 from utils.enums import Mode, Error, TimeOut, TikTokError
 
@@ -201,7 +201,7 @@ class TikTokRecorder:
             VideoManagement.convert_flv_to_mp4(output_file)
 
             if self.use_telegram:
-                Telegram().upload(output_file.replace("_flv.mp4", ".mp4"))
+                TelegramUploader().upload(output_file.replace("_flv.mp4", ".mp4"))
 
     def check_country_blacklisted(self):
         is_blacklisted = self.tiktok.is_country_blacklisted()
