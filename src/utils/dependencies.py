@@ -67,18 +67,6 @@ def check_distro_library():
         return False
 
 
-def check_ffmpeg_library():
-    try:
-        import ffmpeg
-
-        _ = ffmpeg  # to avoid linting issues
-
-        return True
-    except ModuleNotFoundError:
-        logger.error("ffmpeg-python library is not installed")
-        return False
-
-
 def check_argparse_library():
     try:
         import argparse
@@ -120,18 +108,6 @@ def check_requests_library():
         return False
 
 
-def check_telethon_library():
-    try:
-        import telethon
-
-        _ = telethon  # to avoid linting issues
-
-        return True
-    except ModuleNotFoundError:
-        logger.error("telethon library is not installed")
-        return False
-
-
 def install_requirements():
     try:
         print()
@@ -158,11 +134,9 @@ def check_and_install_dependencies():
 
     dependencies = [
         check_distro_library(),
-        check_ffmpeg_library(),
         check_argparse_library(),
         check_curl_cffi_library(),
         check_requests_library(),
-        check_telethon_library(),
         check_ffmpeg_binary(),
     ]
 

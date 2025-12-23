@@ -10,7 +10,7 @@ class IRecorder(ABC):
         pass
 
     @abstractmethod
-    def stop_recording(self) -> None:
+    async def stop_recording(self) -> None:
         """Stop the current recording."""
         pass
 

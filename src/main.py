@@ -1,16 +1,67 @@
 import sys
 import os
-import multiprocessing
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def record_user(user, url, room_id, mode, interval, proxy, output, duration, cookies):
+import asyncio
+
+
+def run_recordings(args, mode, cookies):
+    async def _run():
+        if isinstance(args.user, list):
+            tasks = []
+            for user in args.user:
+                # Create a recorder for each user
+                # Note: We need to instantiate TikTokRecorder for each user
+                # But TikTokRecorder class design seems to handle one user at a time or followers mode
+                # Let's check how it was initialized before.
+                # Before: multiprocessing.Process(target=record_user, args=...)
+                # record_user created a new TikTokRecorder instance.
+
+                # We can run them as concurrent tasks
+                tasks.append(
+                    record_user(
+                        user,
+                        args.url,
+                        args.room_id,
+                        mode,
+                        args.automatic_interval,
+                        args.proxy,
+                        args.output,
+                        args.duration,
+                        cookies,
+                    )
+                )
+
+            await asyncio.gather(*tasks)
+        else:
+            await record_user(
+                args.user,
+                args.url,
+                args.room_id,
+                mode,
+                args.automatic_interval,
+                args.proxy,
+                args.output,
+                args.duration,
+                cookies,
+            )
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        pass
+
+
+async def record_user(
+    user, url, room_id, mode, interval, proxy, output, duration, cookies
+):
     from core.tiktok_recorder import TikTokRecorder
     from utils.logger_manager import logger
 
     try:
-        TikTokRecorder(
+        recorder = TikTokRecorder(
             url=url,
             user=user,
             room_id=room_id,
@@ -20,56 +71,10 @@ def record_user(user, url, room_id, mode, interval, proxy, output, duration, coo
             proxy=proxy,
             output=output,
             duration=duration,
-        ).run()
+        )
+        await recorder.run()
     except Exception as e:
         logger.error(f"{e}")
-
-
-def run_recordings(args, mode, cookies):
-    if isinstance(args.user, list):
-        processes = []
-        for user in args.user:
-            p = multiprocessing.Process(
-                target=record_user,
-                args=(
-                    user,
-                    args.url,
-                    args.room_id,
-                    mode,
-                    args.automatic_interval,
-                    args.proxy,
-                    args.output,
-                    args.duration,
-                    cookies,
-                ),
-            )
-            p.start()
-            processes.append(p)
-        try:
-            for p in processes:
-                p.join()
-        except KeyboardInterrupt:
-            print("\n[!] Ctrl-C detected.")
-            try:
-                for p in processes:
-                    p.join()
-            except KeyboardInterrupt:
-                print("\n[!] Forcefully terminating all processes.")
-                for p in processes:
-                    if p.is_alive():
-                        p.terminate()
-    else:
-        record_user(
-            args.user,
-            args.url,
-            args.room_id,
-            mode,
-            args.automatic_interval,
-            args.proxy,
-            args.output,
-            args.duration,
-            cookies,
-        )
 
 
 def main():
@@ -107,7 +112,7 @@ if __name__ == "__main__":
     check_and_install_dependencies()
 
     # set up signal handling for graceful shutdown
-    multiprocessing.freeze_support()
+    # multiprocessing.freeze_support() # Not needed for asyncio
 
     from utils.signals import setup_signal_handlers
 

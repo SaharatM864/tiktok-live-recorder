@@ -1,9 +1,13 @@
+import asyncio
+import os
 import time
-from threading import Thread
+from asyncio import AbstractEventLoop
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from core.tiktok_api import TikTokAPI
+from core.recorders.ffmpeg_recorder import FFmpegRecorder
 from utils.logger_manager import logger
-from utils.video_management import VideoManagement
 from utils.custom_exceptions import LiveNotFound, UserLiveError, TikTokRecorderError
 from utils.enums import Mode, Error, TimeOut, TikTokError
 from utils.signals import stop_event
@@ -36,7 +40,9 @@ class TikTokRecorder:
         self.duration = duration
         self.output = output
 
-        # Tool Settings
+        # Async helpers
+        self.loop: Optional[AbstractEventLoop] = None
+        self.executor = ThreadPoolExecutor(max_workers=5)
 
         # Check if the user's country is blacklisted
         self.check_country_blacklisted()
@@ -63,105 +69,119 @@ class TikTokRecorder:
 
             logger.info(f"USERNAME: {self.user}" + ("\n" if not self.room_id else ""))
             if self.room_id:
+                is_alive = self.tiktok.is_room_alive(self.room_id)
                 logger.info(
-                    f"ROOM_ID:  {self.room_id}"
-                    + ("\n" if not self.tiktok.is_room_alive(self.room_id) else "")
+                    f"ROOM_ID:  {self.room_id}" + ("\n" if not is_alive else "")
                 )
 
         # If proxy is provided, set up the HTTP client without the proxy
         if proxy:
             self.tiktok = TikTokAPI(proxy=None, cookies=cookies)
 
-    def run(self):
+    async def run(self):
         """
         runs the program in the selected mode.
-
-        If the mode is MANUAL, it checks if the user is currently live and
-        if so, starts recording.
-
-        If the mode is AUTOMATIC, it continuously checks if the user is live
-        and if not, waits for the specified timeout before rechecking.
-        If the user is live, it starts recording.
-
-        if the mode is FOLLOWERS, it continuously checks the followers of
-        the authenticated user. If any follower is live, it starts recording
-        their live stream in a separate process.
         """
+        self.loop = asyncio.get_running_loop()
+
         if self.mode == Mode.MANUAL:
-            self.manual_mode()
+            await self.manual_mode()
 
         elif self.mode == Mode.AUTOMATIC:
-            self.automatic_mode()
+            await self.automatic_mode()
 
         elif self.mode == Mode.FOLLOWERS:
-            self.followers_mode()
+            await self.followers_mode()
 
-    def manual_mode(self):
-        if not self.tiktok.is_room_alive(self.room_id):
+    async def _run_blocking(self, func, *args):
+        """Run blocking function in executor."""
+        return await self.loop.run_in_executor(self.executor, func, *args)
+
+    async def manual_mode(self):
+        is_alive = await self._run_blocking(self.tiktok.is_room_alive, self.room_id)
+        if not is_alive:
             raise UserLiveError(f"@{self.user}: {TikTokError.USER_NOT_CURRENTLY_LIVE}")
 
-        self.start_recording(self.user, self.room_id)
+        await self.start_recording(self.user, self.room_id)
 
-    def automatic_mode(self):
+    async def automatic_mode(self):
         while not stop_event.is_set():
             try:
-                self.room_id = self.tiktok.get_room_id_from_user(self.user)
-                self.manual_mode()
+                self.room_id = await self._run_blocking(
+                    self.tiktok.get_room_id_from_user, self.user
+                )
+
+                is_alive = await self._run_blocking(
+                    self.tiktok.is_room_alive, self.room_id
+                )
+                if not is_alive:
+                    raise UserLiveError(
+                        f"@{self.user}: {TikTokError.USER_NOT_CURRENTLY_LIVE}"
+                    )
+
+                await self.start_recording(self.user, self.room_id)
 
             except UserLiveError as ex:
                 logger.info(ex)
                 logger.info(
                     f"Waiting {self.automatic_interval} minutes before recheck\n"
                 )
-                time.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
+                await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
             except LiveNotFound as ex:
                 logger.error(f"Live not found: {ex}")
                 logger.info(
                     f"Waiting {self.automatic_interval} minutes before recheck\n"
                 )
-                time.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
+                await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
             except ConnectionError:
                 logger.error(Error.CONNECTION_CLOSED_AUTOMATIC)
-                time.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
+                await asyncio.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
 
             except Exception as ex:
                 logger.error(f"Unexpected error: {ex}\n")
+                await asyncio.sleep(5)  # Prevent tight loop on error
 
-    def followers_mode(self):
-        active_recordings = {}  # follower -> Process
+    async def followers_mode(self):
+        active_recordings = {}  # follower -> Task
 
         while not stop_event.is_set():
             try:
-                followers = self.tiktok.get_followers_list(self.sec_uid)
+                followers = await self._run_blocking(
+                    self.tiktok.get_followers_list, self.sec_uid
+                )
 
                 for follower in followers:
                     if follower in active_recordings:
-                        if not active_recordings[follower].is_alive():
+                        if active_recordings[follower].done():
                             logger.info(f"Recording of @{follower} finished.")
                             del active_recordings[follower]
                         else:
                             continue
 
                     try:
-                        room_id = self.tiktok.get_room_id_from_user(follower)
+                        room_id = await self._run_blocking(
+                            self.tiktok.get_room_id_from_user, follower
+                        )
 
-                        if not room_id or not self.tiktok.is_room_alive(room_id):
-                            # logger.info(f"@{follower} is not live. Skipping...")
+                        if not room_id:
+                            continue
+
+                        is_alive = await self._run_blocking(
+                            self.tiktok.is_room_alive, room_id
+                        )
+                        if not is_alive:
                             continue
 
                         logger.info(f"@{follower} is live. Starting recording...")
 
-                        thread = Thread(
-                            target=self.start_recording,
-                            args=(follower, room_id),
-                            daemon=True,
+                        task = asyncio.create_task(
+                            self.start_recording(follower, room_id)
                         )
-                        thread.start()
-                        active_recordings[follower] = thread
+                        active_recordings[follower] = task
 
-                        time.sleep(2.5)
+                        await asyncio.sleep(2.5)
 
                     except Exception as e:
                         logger.error(f"Error while processing @{follower}: {e}")
@@ -170,33 +190,70 @@ class TikTokRecorder:
                 print()
                 delay = self.automatic_interval * TimeOut.ONE_MINUTE
                 logger.info(f"Waiting {delay} minutes for the next check...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
             except UserLiveError as ex:
                 logger.info(ex)
                 logger.info(
                     f"Waiting {self.automatic_interval} minutes before recheck\n"
                 )
-                time.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
+                await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
             except ConnectionError:
                 logger.error(Error.CONNECTION_CLOSED_AUTOMATIC)
-                time.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
+                await asyncio.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
 
             except Exception as ex:
                 logger.error(f"Unexpected error: {ex}\n")
+                await asyncio.sleep(5)
 
-    def start_recording(self, user, room_id):
+    async def start_recording(self, user, room_id):
         """
         Start recording live
         """
-        from core.http_recorder import HttpRecorder
+        try:
+            live_url = await self._run_blocking(self.tiktok.get_live_url, room_id)
+            if not live_url:
+                raise LiveNotFound(TikTokError.RETRIEVE_LIVE_URL)
 
-        recorder = HttpRecorder(self.tiktok, self.output, self.duration)
-        output_file = recorder.record(user, room_id, self.mode)
+            current_date = time.strftime("%Y.%m.%d_%H-%M-%S", time.localtime())
 
-        if output_file:
-            VideoManagement.convert_flv_to_mp4(output_file)
+            # Handle output directory path
+            output_path = self.output_dir_path(self.output)
+
+            filename = f"{output_path}TK_{user}_{current_date}.mp4"
+
+            recorder = FFmpegRecorder()
+
+            if self.duration:
+                logger.info(f"Started recording for {self.duration} seconds ")
+
+                # Create a task to stop recording after duration
+                async def stop_after_duration():
+                    await asyncio.sleep(self.duration)
+                    await recorder.stop_recording()
+
+                asyncio.create_task(stop_after_duration())
+            else:
+                logger.info("Started recording...")
+
+            await recorder.start_recording(live_url, filename)
+
+            logger.info(f"Recording finished: {filename}\n")
+
+        except Exception as e:
+            logger.error(f"Error recording {user}: {e}")
+
+    def output_dir_path(self, output_path):
+        if isinstance(output_path, str) and output_path != "":
+            if not (output_path.endswith("/") or output_path.endswith("\\")):
+                if os.name == "nt":
+                    output_path = output_path + "\\"
+                else:
+                    output_path = output_path + "/"
+        else:
+            output_path = ""
+        return output_path
 
     def check_country_blacklisted(self):
         is_blacklisted = self.tiktok.is_country_blacklisted()
