@@ -1,37 +1,33 @@
 import re
-import json
+import orjson
 from typing import Optional
 
 
 class TikTokUrlParser:
     """
-    Shared logic for parsing TikTok URLs and HTML content.
+    ตรรกะที่ใช้ร่วมกันสำหรับการแยกวิเคราะห์ URL ของ TikTok และเนื้อหา HTML
     """
 
-    @staticmethod
-    def parse_room_id_from_html(html: str) -> Optional[str]:
-        """
-        Extracts room_id from the HTML content of a TikTok live page.
-        """
-        # Pattern 1: room_id=1234567890
-        match = re.search(r"room_id=([0-9]+)", html)
-        if match:
-            return match.group(1)
+    # Pre-compile Regex เพื่อประสิทธิภาพที่ดีขึ้น (ไม่ต้อง compile ใหม่ทุกครั้งที่เรียกใช้)
+    _ROOM_ID_PATTERN_1 = re.compile(r"room_id=([0-9]+)")
+    _ROOM_ID_PATTERN_2 = re.compile(r'"roomId":"([0-9]+)"')
+    _SIGI_STATE_PATTERN = re.compile(
+        r'<script id="SIGI_STATE" type="application/json">(.*?)</script>'
+    )
+    _USER_URL_PATTERN = re.compile(r"https?://(?:www\.)?tiktok\.com/@([^/]+)/live")
 
-        # Pattern 2: "roomId":"1234567890"
-        match = re.search(r'"roomId":"([0-9]+)"', html)
-        if match:
-            return match.group(1)
-
-        # Pattern 3: SIGI_STATE (JSON in script tag)
-        match = re.search(
-            r'<script id="SIGI_STATE" type="application/json">(.*?)</script>',
-            html,
-        )
+    @classmethod
+    def parse_room_id_from_html(cls, html: str) -> Optional[str]:
+        """
+        ดึง room_id จากเนื้อหา HTML ของหน้าไลฟ์ TikTok
+        """
+        # ลองค้นหาจาก SIGI_STATE ก่อน เพราะเป็นวิธีที่น่าเชื่อถือที่สุดสำหรับ TikTok เวอร์ชันใหม่
+        match = cls._SIGI_STATE_PATTERN.search(html)
         if match:
             try:
-                data = json.loads(match.group(1))
-                # Navigate json to find room id
+                # ใช้ orjson.loads แทน json.loads เพื่อความเร็ว
+                data = orjson.loads(match.group(1))
+                # ท่องเข้าไปใน json เพื่อหา room id
                 live_room = (
                     data.get("LiveRoom", {})
                     .get("liveRoomUserInfo", {})
@@ -43,15 +39,24 @@ class TikTokUrlParser:
             except Exception:
                 pass
 
+        # ถ้าไม่เจอ ให้ลองใช้ Pattern แบบง่าย
+        match = cls._ROOM_ID_PATTERN_1.search(html)
+        if match:
+            return match.group(1)
+
+        match = cls._ROOM_ID_PATTERN_2.search(html)
+        if match:
+            return match.group(1)
+
         return None
 
-    @staticmethod
-    def parse_user_from_url(url: str) -> Optional[str]:
+    @classmethod
+    def parse_user_from_url(cls, url: str) -> Optional[str]:
         """
-        Extracts username from a TikTok live URL.
+        ดึงชื่อผู้ใช้ (username) จาก URL ของ TikTok live
         """
         # https://www.tiktok.com/@<username>/live
-        match = re.match(r"https?://(?:www\.)?tiktok\.com/@([^/]+)/live", url)
+        match = cls._USER_URL_PATTERN.match(url)
         if match:
             return match.group(1)
         return None

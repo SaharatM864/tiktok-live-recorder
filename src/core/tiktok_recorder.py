@@ -1,9 +1,7 @@
 import asyncio
 import os
 import time
-from asyncio import AbstractEventLoop
-from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Dict
 
 from core.tiktok_api import TikTokAPI
 from core.recorders.ffmpeg_recorder import FFmpegRecorder
@@ -26,34 +24,29 @@ class TikTokRecorder:
         output,
         duration,
     ):
-        # Setup TikTok API client
+        # ตั้งค่า client API ของ TikTok
         self.tiktok = TikTokAPI(proxy=proxy, cookies=cookies)
 
-        # TikTok Data
+        # ข้อมูล TikTok
         self.url = url
         self.user = user
         self.room_id = room_id
 
-        # Tool Settings
+        # การตั้งค่าเครื่องมือ
         self.mode = mode
         self.automatic_interval = automatic_interval
         self.duration = duration
         self.output = output
 
-        # Async helpers
-        self.loop: Optional[AbstractEventLoop] = None
-        self.executor = ThreadPoolExecutor(max_workers=5)
-
-        # If proxy is provided, set up the HTTP client without the proxy
+        # หากมีการระบุ proxy ให้ตั้งค่า HTTP client โดยไม่ใช้ proxy
         if proxy:
             self.tiktok = TikTokAPI(proxy=None, cookies=cookies)
 
     async def _initialize(self):
         """
-        Perform async initialization tasks.
+        ดำเนินการ initialization tasks แบบ async
         """
-        # Check if the user's country is blacklisted
-        logger.info("Checking country blacklist status...")
+        logger.info("กำลังตรวจสอบสถานะการบล็อกประเทศ...")
         is_blacklisted = await self.tiktok.is_country_blacklisted()
         if is_blacklisted:
             if self.room_id is None:
@@ -65,32 +58,30 @@ class TikTokRecorder:
                     TikTokError.COUNTRY_BLACKLISTED_FOLLOWERS_MODE
                 )
 
-        # Retrieve sec_uid if the mode is FOLLOWERS
         if self.mode == Mode.FOLLOWERS:
             self.sec_uid = await self.tiktok.get_sec_uid()
             if self.sec_uid is None:
-                raise TikTokRecorderError("Failed to retrieve sec_uid.")
+                raise TikTokRecorderError("ไม่สามารถดึงค่า sec_uid ได้")
 
-            logger.info("Followers mode activated\n")
+            logger.info("โหมดผู้ติดตามเปิดใช้งาน\n")
         else:
-            # Get live information based on the provided user data
             if self.url:
-                logger.info(f"Fetching user info from URL: {self.url}")
+                logger.info(f"กำลังดึงข้อมูลผู้ใช้จาก URL: {self.url}")
                 self.user, self.room_id = await self.tiktok.get_room_and_user_from_url(
                     self.url
                 )
 
             if not self.user:
-                logger.info(f"Fetching user info from Room ID: {self.room_id}")
+                logger.info(f"กำลังดึงข้อมูลผู้ใช้จาก Room ID: {self.room_id}")
                 self.user = await self.tiktok.get_user_from_room_id(self.room_id)
 
             if not self.room_id:
-                logger.info(f"Fetching Room ID for user: {self.user}")
+                logger.info(f"กำลังดึง Room ID สำหรับผู้ใช้: {self.user}")
                 self.room_id = await self.tiktok.get_room_id_from_user(self.user)
 
-            logger.info(f"USERNAME: {self.user}" + ("\n" if not self.room_id else ""))
+            logger.info(f"ชื่อผู้ใช้: {self.user}" + ("\n" if not self.room_id else ""))
             if self.room_id:
-                logger.info(f"Checking if room {self.room_id} is alive...")
+                logger.info(f"กำลังตรวจสอบว่าห้อง {self.room_id} ไลฟ์อยู่หรือไม่...")
                 is_alive = await self.tiktok.is_room_alive(self.room_id)
                 logger.info(
                     f"ROOM_ID:  {self.room_id}" + ("\n" if not is_alive else "")
@@ -98,9 +89,8 @@ class TikTokRecorder:
 
     async def run(self):
         """
-        runs the program in the selected mode.
+        รันโปรแกรมในโหมดที่เลือก
         """
-        self.loop = asyncio.get_running_loop()
         try:
             await self._initialize()
 
@@ -137,16 +127,12 @@ class TikTokRecorder:
 
             except UserLiveError as ex:
                 logger.info(ex)
-                logger.info(
-                    f"Waiting {self.automatic_interval} minutes before recheck\n"
-                )
+                logger.info(f"รอ {self.automatic_interval} นาทีก่อนตรวจสอบใหม่\n")
                 await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
             except LiveNotFound as ex:
-                logger.error(f"Live not found: {ex}")
-                logger.info(
-                    f"Waiting {self.automatic_interval} minutes before recheck\n"
-                )
+                logger.error(f"ไม่พบไลฟ์: {ex}")
+                logger.info(f"รอ {self.automatic_interval} นาทีก่อนตรวจสอบใหม่\n")
                 await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
             except ConnectionError:
@@ -154,70 +140,85 @@ class TikTokRecorder:
                 await asyncio.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
 
             except Exception as ex:
-                logger.error(f"Unexpected error: {ex}\n")
-                await asyncio.sleep(5)  # Prevent tight loop on error
+                logger.error(f"ข้อผิดพลาดที่ไม่คาดคิด: {ex}\n")
+                await asyncio.sleep(5)
 
     async def followers_mode(self):
-        active_recordings = {}  # follower -> Task
+        active_recordings: Dict[str, asyncio.Task] = {}
+        user_room_cache: Dict[str, str] = {}
 
         while not stop_event.is_set():
             try:
                 followers = await self.tiktok.get_followers_list(self.sec_uid)
+                if not followers:
+                    logger.info("ไม่พบผู้ติดตาม หรือดึงข้อมูลล้มเหลว รอสักครู่...")
+                    await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
+                    continue
 
-                for follower in followers:
-                    if follower in active_recordings:
-                        if active_recordings[follower].done():
-                            logger.info(f"Recording of @{follower} finished.")
-                            del active_recordings[follower]
+                for user in list(active_recordings.keys()):
+                    if active_recordings[user].done():
+                        logger.info(f"การบันทึกของ @{user} เสร็จสิ้น")
+                        del active_recordings[user]
+
+                users_to_check = [u for u in followers if u not in active_recordings]
+
+                if not users_to_check:
+                    await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
+                    continue
+
+                users_needing_resolution = [
+                    u for u in users_to_check if u not in user_room_cache
+                ]
+
+                if users_needing_resolution:
+                    logger.info(
+                        f"กำลังค้นหา Room ID สำหรับ {len(users_needing_resolution)} ผู้ใช้ใหม่..."
+                    )
+                    tasks = [
+                        self.tiktok.get_room_id_from_user(u)
+                        for u in users_needing_resolution
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    for user, result in zip(users_needing_resolution, results):
+                        if isinstance(result, str) and result:
+                            user_room_cache[user] = result
                         else:
-                            continue
+                            if isinstance(result, Exception):
+                                logger.debug(f"ไม่สามารถหา Room ID ของ {user}: {result}")
 
-                    try:
-                        room_id = await self.tiktok.get_room_id_from_user(follower)
+                batch_check_map = {}
+                for user in users_to_check:
+                    if user in user_room_cache:
+                        batch_check_map[user] = user_room_cache[user]
 
-                        if not room_id:
-                            continue
+                if batch_check_map:
+                    room_ids_list = list(batch_check_map.values())
+                    chunk_size = 50
+                    for i in range(0, len(room_ids_list), chunk_size):
+                        chunk = room_ids_list[i : i + chunk_size]
+                        status_map = await self.tiktok.is_room_alive(chunk)
 
-                        is_alive = await self.tiktok.is_room_alive(room_id)
-                        if not is_alive:
-                            continue
+                        for user, room_id in batch_check_map.items():
+                            if room_id in chunk and status_map.get(room_id):
+                                logger.info(f"@{user} กำลังไลฟ์! เริ่มต้นการบันทึก...")
+                                task = asyncio.create_task(
+                                    self.start_recording(user, room_id)
+                                )
+                                active_recordings[user] = task
 
-                        logger.info(f"@{follower} is live. Starting recording...")
-
-                        task = asyncio.create_task(
-                            self.start_recording(follower, room_id)
-                        )
-                        active_recordings[follower] = task
-
-                        await asyncio.sleep(2.5)
-
-                    except Exception as e:
-                        logger.error(f"Error while processing @{follower}: {e}")
-                        continue
-
-                print()
-                delay = self.automatic_interval * TimeOut.ONE_MINUTE
-                logger.info(f"Waiting {delay} minutes for the next check...")
-                await asyncio.sleep(delay)
-
-            except UserLiveError as ex:
-                logger.info(ex)
                 logger.info(
-                    f"Waiting {self.automatic_interval} minutes before recheck\n"
+                    f"ตรวจสอบผู้ติดตาม {len(users_to_check)} คนเรียบร้อยแล้ว รอ {self.automatic_interval} นาทีก่อนตรวจสอบรอบถัดไป..."
                 )
                 await asyncio.sleep(self.automatic_interval * TimeOut.ONE_MINUTE)
 
-            except ConnectionError:
-                logger.error(Error.CONNECTION_CLOSED_AUTOMATIC)
-                await asyncio.sleep(TimeOut.CONNECTION_CLOSED * TimeOut.ONE_MINUTE)
-
             except Exception as ex:
-                logger.error(f"Unexpected error: {ex}\n")
-                await asyncio.sleep(5)
+                logger.error(f"เกิดข้อผิดพลาดในลูป followers: {ex}")
+                await asyncio.sleep(60)
 
     async def start_recording(self, user, room_id):
         """
-        Start recording live
+        เริ่มบันทึกการไลฟ์
         """
         try:
             live_url = await self.tiktok.get_live_url(room_id)
@@ -225,32 +226,28 @@ class TikTokRecorder:
                 raise LiveNotFound(TikTokError.RETRIEVE_LIVE_URL)
 
             current_date = time.strftime("%Y.%m.%d_%H-%M-%S", time.localtime())
-
-            # Handle output directory path
             output_path = self.output_dir_path(self.output)
-
             filename = f"{output_path}TK_{user}_{current_date}.mp4"
 
             recorder = FFmpegRecorder()
 
             if self.duration:
-                logger.info(f"Started recording for {self.duration} seconds ")
+                logger.info(f"เริ่มบันทึกเป็นเวลา {self.duration} วินาที ")
 
-                # Create a task to stop recording after duration
                 async def stop_after_duration():
                     await asyncio.sleep(self.duration)
                     await recorder.stop_recording()
 
                 asyncio.create_task(stop_after_duration())
             else:
-                logger.info("Started recording...")
+                logger.info("เริ่มบันทึก...")
 
             await recorder.start_recording(live_url, filename)
 
-            logger.info(f"Recording finished: {filename}\n")
+            logger.info(f"การบันทึกเสร็จสิ้น: {filename}\n")
 
         except Exception as e:
-            logger.error(f"Error recording {user}: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการบันทึก {user}: {e}")
 
     def output_dir_path(self, output_path):
         if isinstance(output_path, str) and output_path != "":

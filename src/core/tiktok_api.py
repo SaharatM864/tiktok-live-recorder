@@ -1,5 +1,6 @@
-import json
 import re
+import orjson  # ใช้ orjson เพื่อประสิทธิภาพในการ parse JSON
+from typing import Union, List, Dict
 
 from http_utils.async_http_client import AsyncHttpClient
 from utils.enums import StatusCode, TikTokError
@@ -9,7 +10,6 @@ from utils.custom_exceptions import (
     TikTokRecorderError,
     LiveNotFound,
 )
-
 
 from core.common import TikTokUrlParser
 
@@ -29,7 +29,7 @@ class TikTokAPI:
 
     async def is_country_blacklisted(self) -> bool:
         """
-        Checks if the user is in a blacklisted country that requires login
+        ตรวจสอบว่าผู้ใช้อยู่ในประเทศที่ถูกบล็อกซึ่งต้องเข้าสู่ระบบหรือไม่
         """
         try:
             response = await self.http_client.get(
@@ -37,34 +37,57 @@ class TikTokAPI:
             )
             return response.status_code == StatusCode.REDIRECT
         except Exception as e:
-            logger.error(f"Error checking country blacklist: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการตรวจสอบ country blacklist: {e}")
             return False
 
-    async def is_room_alive(self, room_id: str) -> bool:
+    async def is_room_alive(
+        self, room_id: Union[str, List[str]]
+    ) -> Union[bool, Dict[str, bool]]:
         """
-        Checking whether the user is live.
+        ตรวจสอบว่าผู้ใช้กำลังไลฟ์อยู่หรือไม่
+        รองรับทั้งแบบ room_id เดียว (str) และหลาย room_id (List[str]) เพื่อทำ Batch request
         """
         if not room_id:
-            raise UserLiveError(TikTokError.USER_NOT_CURRENTLY_LIVE)
+            if isinstance(room_id, list):
+                return {}
+            return False
+
+        # แปลง room_id เป็น string สำหรับส่งใน URL
+        is_batch = isinstance(room_id, list)
+        room_ids_str = ",".join(room_id) if is_batch else room_id
 
         try:
             response = await self.http_client.get(
                 f"{self.WEBCAST_URL}/webcast/room/check_alive/"
-                f"?aid=1988&region=CH&room_ids={room_id}&user_is_login=true"
+                f"?aid=1988&region=CH&room_ids={room_ids_str}&user_is_login=true"
             )
-            data = response.json()
 
-            if "data" not in data or len(data["data"]) == 0:
-                return False
+            data = orjson.loads(response.content)
 
-            return data["data"][0].get("alive", False)
+            if "data" not in data:
+                return {} if is_batch else False
+
+            data_list = data["data"]
+
+            if is_batch:
+                result = {}
+                for item in data_list:
+                    r_id = str(item.get("room_id", ""))
+                    is_alive = item.get("alive", False)
+                    result[r_id] = is_alive
+                return result
+            else:
+                if len(data_list) == 0:
+                    return False
+                return data_list[0].get("alive", False)
+
         except Exception as e:
-            logger.error(f"Error checking room alive: {e}")
-            return False
+            logger.error(f"เกิดข้อผิดพลาดในการตรวจสอบสถานะห้อง (is_room_alive): {e}")
+            return {} if is_batch else False
 
     async def get_sec_uid(self):
         """
-        Returns the sec_uid of the authenticated user.
+        คืนค่า sec_uid ของผู้ใช้ที่ยืนยันตัวตนแล้ว
         """
         try:
             response = await self.http_client.get(f"{self.BASE_URL}/foryou")
@@ -75,23 +98,24 @@ class TikTokAPI:
                 return sec_uid.group(1)
             return None
         except Exception as e:
-            logger.error(f"Error getting sec_uid: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการดึง sec_uid: {e}")
             return None
 
     async def get_user_from_room_id(self, room_id) -> str:
         """
-        Given a room_id, I get the username
+        รับ room_id แล้วคืนค่า username
         """
         try:
             response = await self.http_client.get(
                 f"{self.WEBCAST_URL}/webcast/room/info/?aid=1988&room_id={room_id}"
             )
-            data = response.json()
+            data = orjson.loads(response.content)
+            data_str = str(data)
 
-            if "Follow the creator to watch their LIVE" in json.dumps(data):
+            if "Follow the creator to watch their LIVE" in data_str:
                 raise UserLiveError(TikTokError.ACCOUNT_PRIVATE_FOLLOW)
 
-            if "This account is private" in str(data):
+            if "This account is private" in data_str:
                 raise UserLiveError(TikTokError.ACCOUNT_PRIVATE)
 
             display_id = data.get("data", {}).get("owner", {}).get("display_id")
@@ -100,12 +124,12 @@ class TikTokAPI:
 
             return display_id
         except Exception as e:
-            logger.error(f"Error getting user from room_id: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการดึง user จาก room_id: {e}")
             raise TikTokRecorderError(TikTokError.USERNAME_ERROR)
 
     async def get_room_and_user_from_url(self, live_url: str):
         """
-        Given a url, get user and room_id.
+        รับ url แล้วคืนค่า user และ room_id
         """
         try:
             response = await self.http_client.get(live_url, allow_redirects=False)
@@ -114,27 +138,22 @@ class TikTokAPI:
             if response.status_code == StatusCode.REDIRECT:
                 raise UserLiveError(TikTokError.COUNTRY_BLACKLISTED)
 
-            if response.status_code == StatusCode.MOVED:  # MOBILE URL
+            if response.status_code == StatusCode.MOVED:
                 matches = re.findall("com/@(.*?)/live", content)
                 if len(matches) < 1:
                     raise LiveNotFound(TikTokError.INVALID_TIKTOK_LIVE_URL)
 
                 user = matches[0]
             else:
-                # https://www.tiktok.com/@<username>/live
-                match = re.match(
-                    r"https?://(?:www\.)?tiktok\.com/@([^/]+)/live", live_url
-                )
-                if match:
-                    user = match.group(1)
-                else:
+                user = TikTokUrlParser.parse_user_from_url(live_url)
+                if not user:
                     raise LiveNotFound(TikTokError.INVALID_TIKTOK_LIVE_URL)
 
             room_id = await self.get_room_id_from_user(user)
 
             return user, room_id
         except Exception as e:
-            logger.error(f"Error getting room and user from url: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการดึง room และ user จาก url: {e}")
             raise e
 
     async def _tikrec_get_room_id_signed_url(self, user: str) -> str:
@@ -142,14 +161,13 @@ class TikTokAPI:
             f"{self.TIKREC_API}/tiktok/room/api/sign",
             params={"unique_id": user},
         )
-        data = response.json()
+        data = orjson.loads(response.content)
         signed_path = data.get("signed_path")
         return f"{self.BASE_URL}{signed_path}"
 
     async def get_room_id_from_user(self, user: str) -> str | None:
-        """Given a username, get the room_id."""
+        """รับ username แล้วคืนค่า room_id"""
         try:
-            # 1. Try scraping first (Fastest & Stealthy with curl_cffi)
             try:
                 response = await self.http_client.get(
                     f"{self.BASE_URL}/@{user}/live", allow_redirects=False
@@ -159,26 +177,24 @@ class TikTokAPI:
                     if room_id:
                         return room_id
             except Exception as e:
-                logger.warning(f"Scraping method failed (Fallback to API): {e}")
+                logger.warning(f"วิธีการ Scrape ล้มเหล้ว (Fallback ไปใช้ API): {e}")
 
-            # 2. Fallback to Signed API (Slower, External Dependency)
             signed_url = await self._tikrec_get_room_id_signed_url(user)
-
             response = await self.http_client.get(signed_url)
             content = response.text
 
             if not content or "Please wait" in content:
                 raise UserLiveError(TikTokError.WAF_BLOCKED)
 
-            data = response.json()
+            data = orjson.loads(response.content)
             return (data.get("data") or {}).get("user", {}).get("roomId")
         except Exception as e:
-            logger.error(f"Error getting room_id from user: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการดึง room_id จาก user: {e}")
             return None
 
     async def get_followers_list(self, sec_uid) -> list:
         """
-        Returns all followers for the authenticated user by paginating
+        คืนค่ารายชื่อผู้ติดตามทั้งหมดสำหรับผู้ใช้ที่ยืนยันตัวตนแล้วโดยการแบ่งหน้า
         """
         followers = []
         cursor = 0
@@ -201,9 +217,6 @@ class TikTokAPI:
                 "msToken=GphHoLvRR4QxA5AWVwDkrs3AbumoK5H8toE8LVHtj6cce3ToGdXhMfvDWzOXG-0GXUWoaGVHrwGNA4k_NnjuFFnHgv2S5eMjsvtkAhwMPa13xLmvP7tumx0KreFjPwTNnOj-BvAkPdO5Zrev3hoFBD9lHVo=&X-Bogus=&X-Gnarly="
             )
 
-            # Need to handle cookies properly if needed, but for now just proceed
-            # ms_token = response.cookies["msToken"] # aiohttp handles cookies in session
-
             while has_more:
                 url = (
                     "https://www.tiktok.com/api/user/list/?"
@@ -220,12 +233,13 @@ class TikTokAPI:
                     f"webcast_language=it-IT&X-Bogus=&X-Gnarly="
                 )
 
-                response = await self.http_client.get(url)
+                if cursor != 0:
+                    response = await self.http_client.get(url)
 
                 if response.status_code != StatusCode.OK:
-                    raise TikTokRecorderError("Failed to retrieve followers list.")
+                    raise TikTokRecorderError("ไม่สามารถดึงรายชื่อผู้ติดตามได้")
 
-                data = response.json()
+                data = orjson.loads(response.content)
                 user_list = data.get("userList", [])
 
                 for user in user_list:
@@ -242,28 +256,27 @@ class TikTokAPI:
                 cursor = new_cursor
 
             if not followers:
-                raise TikTokRecorderError("Followers list is empty.")
+                raise TikTokRecorderError("รายชื่อผู้ติดตามว่างเปล่า")
 
             return followers
         except Exception as e:
-            logger.error(f"Error getting followers list: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการดึงรายชื่อผู้ติดตาม: {e}")
             return []
 
     async def get_live_url(self, room_id: str) -> str | None:
         """
-        Return the cdn (flv or m3u8) of the streaming
+        คืนค่า cdn (flv หรือ m3u8) ของการสตรีม
         """
         response = await self.http_client.get(
             f"{self.WEBCAST_URL}/webcast/room/info/?aid=1988&room_id={room_id}"
         )
-        data = response.json()
+        data = orjson.loads(response.content)
 
-        if "This account is private" in data:
+        if "This account is private" in str(data):
             raise UserLiveError(TikTokError.ACCOUNT_PRIVATE)
 
         stream_url = data.get("data", {}).get("stream_url", {})
 
-        # Try to get stream URL directly from flv_pull_url first (faster)
         flv_url = (
             stream_url.get("flv_pull_url", {}).get("FULL_HD1")
             or stream_url.get("flv_pull_url", {}).get("HD1")
@@ -275,7 +288,6 @@ class TikTokAPI:
         if flv_url:
             return flv_url
 
-        # Fallback to SDK data parsing if legacy URL is not available
         sdk_data_str = (
             stream_url.get("live_core_sdk_data", {})
             .get("pull_data", {})
@@ -284,9 +296,8 @@ class TikTokAPI:
         if not sdk_data_str:
             return None
 
-        # Extract stream options
         try:
-            sdk_data = json.loads(sdk_data_str).get("data", {})
+            sdk_data = orjson.loads(sdk_data_str).get("data", {})
             qualities = (
                 stream_url.get("live_core_sdk_data", {})
                 .get("pull_data", {})
@@ -309,5 +320,5 @@ class TikTokAPI:
 
             return best_flv
         except Exception as e:
-            logger.error(f"Error parsing SDK data: {e}")
+            logger.error(f"เกิดข้อผิดพลาดในการ parse SDK data: {e}")
             return None
