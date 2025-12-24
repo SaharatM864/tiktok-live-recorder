@@ -60,6 +60,10 @@ class FFmpegRecorder(IRecorder):
         self._is_recording = True
         self._stop_event.clear()
 
+        # Define tasks variables outside try block to ensure visibility in finally
+        stop_task = None
+        process_task = None
+
         try:
             # Ensure directory exists
             dirname = os.path.dirname(output_path)
@@ -93,10 +97,11 @@ class FFmpegRecorder(IRecorder):
                 stdin=asyncio.subprocess.PIPE,
             )
 
-            # Wait for stop event or process exit
+            # Create tasks
             stop_task = asyncio.create_task(self._stop_event.wait())
             process_task = asyncio.create_task(self._process.wait())
 
+            # Wait for either stop event or process exit
             done, pending = await asyncio.wait(
                 [stop_task, process_task], return_when=asyncio.FIRST_COMPLETED
             )
@@ -106,8 +111,9 @@ class FFmpegRecorder(IRecorder):
                 return_code = process_task.result()
                 if return_code != 0:
                     _, stderr = await self._process.communicate()
+                    error_msg = stderr.decode() if stderr else "Unknown error"
                     logger.error(
-                        f"FFmpeg exited with error code {return_code}: {stderr.decode()}"
+                        f"FFmpeg exited with error code {return_code}: {error_msg}"
                     )
                 else:
                     logger.info("FFmpeg process finished successfully")
@@ -119,5 +125,20 @@ class FFmpegRecorder(IRecorder):
         except Exception as e:
             logger.error(f"Error in FFmpegRecorder: {e}")
         finally:
+            # Critical Fix: Cancel any pending tasks to avoid 'Task was destroyed but it is pending'
+            if stop_task and not stop_task.done():
+                stop_task.cancel()
+                try:
+                    await stop_task
+                except asyncio.CancelledError:
+                    pass
+
+            if process_task and not process_task.done():
+                process_task.cancel()
+                try:
+                    await process_task
+                except asyncio.CancelledError:
+                    pass
+
             self._is_recording = False
             self._process = None

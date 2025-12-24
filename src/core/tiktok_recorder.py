@@ -227,26 +227,19 @@ class TikTokRecorder:
 
             current_date = time.strftime("%Y.%m.%d_%H-%M-%S", time.localtime())
 
-            # --- Refactored Path Logic using pathlib ---
-            # 1. กำหนด Main Folder (Root Output)
-            # ถ้ามีการระบุ -output มา ให้ใช้ค่านั้นเป็น Folder หลัก
-            # ถ้าไม่มี ให้ใช้ "downloads" เป็นค่าเริ่มต้น (Folder หลัก)
+            # --- Path Logic using pathlib ---
             if self.output:
                 base_output = Path(self.output)
             else:
                 base_output = Path("downloads")
 
-            # 2. สร้าง Path ย่อยตามชื่อ User ภายใน Main Folder (e.g., downloads/username)
             user_dir = base_output / user
-
-            # 3. กำหนดชื่อไฟล์
             filename = f"TK_{user}_{current_date}.mp4"
-
-            # 4. รวมเป็น Full Path
             full_path = user_dir / filename
-            # -------------------------------------------
+            # --------------------------------
 
             recorder = FFmpegRecorder()
+            stop_task = None  # Handle for duration task
 
             if self.duration:
                 logger.info(f"เริ่มบันทึกเป็นเวลา {self.duration} วินาที ")
@@ -255,13 +248,22 @@ class TikTokRecorder:
                     await asyncio.sleep(self.duration)
                     await recorder.stop_recording()
 
-                asyncio.create_task(stop_after_duration())
+                stop_task = asyncio.create_task(stop_after_duration())
             else:
                 logger.info("เริ่มบันทึก...")
 
-            # ส่ง Path เป็น string ให้ FFmpegRecorder
-            # (FFmpegRecorder จะทำการสร้าง Folder ทั้งหมดตาม Path ที่ส่งไปให้อัตโนมัติด้วย os.makedirs)
-            await recorder.start_recording(live_url, str(full_path))
+            try:
+                # FFmpegRecorder handles directory creation now, but logic above creates user_dir path
+                # start_recording now accepts string path
+                await recorder.start_recording(live_url, str(full_path))
+            finally:
+                # Cleanup duration task if recording ends early
+                if stop_task and not stop_task.done():
+                    stop_task.cancel()
+                    try:
+                        await stop_task
+                    except asyncio.CancelledError:
+                        pass
 
             logger.info(f"การบันทึกเสร็จสิ้น: {full_path}\n")
 
