@@ -39,7 +39,7 @@ This project is a complete rewrite of the original TikTok Live Recorder, designe
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/SaharatM864/tiktok-live-recorder.git
     cd tiktok-live-recorder
     ```
 
