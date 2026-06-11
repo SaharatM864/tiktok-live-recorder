@@ -13,12 +13,17 @@ def main():
     password = os.getenv("VM_PASSWORD")
     
     if not all([hostname, username, password]):
-        print("[-] Error: Missing environment variables. Please check your .env file.")
+        print("[-] Error: Missing connection variables. Please check your .env file.")
         print("    Required: VM_HOSTNAME, VM_USERNAME, VM_PASSWORD")
         sys.exit(1)
     
-    source_dir = os.getenv("SOURCE_DIR", "/home/***REMOVED_USERNAME***/tiktok-live-recorder/downloads/asmr_natty")
-    dest_dir = os.getenv("DEST_DIR", 'gdrive:"TikTok recorder/asmr_natty"')
+    source_dir = os.getenv("SOURCE_DIR")
+    dest_dir = os.getenv("DEST_DIR")
+    
+    if not all([source_dir, dest_dir]):
+        print("[-] Error: Missing path variables. Please check your .env file.")
+        print("    Required: SOURCE_DIR, DEST_DIR")
+        sys.exit(1)
     
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
