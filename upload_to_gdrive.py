@@ -3,14 +3,22 @@ import sys
 import os
 import time
 from collections import Counter
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def main():
-    hostname = "***REMOVED_HOSTNAME***"
-    username = "***REMOVED_USERNAME***"
-    password = "***REMOVED_PASSWORD***"
+    hostname = os.getenv("VM_HOSTNAME")
+    username = os.getenv("VM_USERNAME")
+    password = os.getenv("VM_PASSWORD")
     
-    source_dir = "/home/***REMOVED_USERNAME***/tiktok-live-recorder/downloads/asmr_natty"
-    dest_dir = 'gdrive:"TikTok recorder/asmr_natty"'
+    if not all([hostname, username, password]):
+        print("[-] Error: Missing environment variables. Please check your .env file.")
+        print("    Required: VM_HOSTNAME, VM_USERNAME, VM_PASSWORD")
+        sys.exit(1)
+    
+    source_dir = os.getenv("SOURCE_DIR", "/home/***REMOVED_USERNAME***/tiktok-live-recorder/downloads/asmr_natty")
+    dest_dir = os.getenv("DEST_DIR", 'gdrive:"TikTok recorder/asmr_natty"')
     
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
